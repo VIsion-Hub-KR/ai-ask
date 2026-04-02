@@ -39,17 +39,17 @@ const context = await chromium.launchPersistentContext(PROFILE_DIR, {
 });
 
 const services = [
-  { name: 'Notion', url: 'https://www.notion.so' },
+  { name: 'Notion', url: 'https://www.notion.so/ai' },
   { name: 'Gemini', url: 'https://gemini.google.com/app' },
   { name: 'ChatGPT', url: 'https://chatgpt.com' },
   { name: 'Claude', url: 'https://claude.ai' },
 ];
 
 const positions = [
-  { left: 0, top: 25, width: 960, height: 540 },
-  { left: 960, top: 25, width: 960, height: 540 },
-  { left: 0, top: 565, width: 960, height: 540 },
-  { left: 960, top: 565, width: 960, height: 540 },
+  { left: 0, top: 0, width: 514, height: 1400 },      // Notion (1번째)
+  { left: 514, top: 0, width: 514, height: 1400 },    // Gemini (2번째)
+  { left: 1028, top: 0, width: 514, height: 1400 },   // ChatGPT (3번째)
+  { left: 1542, top: 0, width: 514, height: 1400 },   // Claude (4번째)
 ];
 
 const pages = {};
@@ -73,12 +73,17 @@ for (let i = 0; i < services.length; i++) {
   const { windowId } = await cdpSession.send('Browser.getWindowForTarget');
   await cdpSession.send('Browser.setWindowBounds', { windowId, bounds: positions[i] });
 
-  await page.goto(url);
+  try {
+    await page.goto(url, { waitUntil: 'load', timeout: 20000 });
+  } catch (e) {
+    console.log(`  ⚠ ${name} (계속)`);
+  }
+  await page.waitForTimeout(1000);
   pages[name] = page;
   console.log(`  ✓ ${name}`);
 }
 
-await Promise.all(Object.values(pages).map(p => p.waitForTimeout(3000)));
+await Promise.all(Object.values(pages).map(p => p.waitForTimeout(2000)));
 
 // ── 최초 실행: 로그인 안내 ──
 
@@ -122,9 +127,9 @@ async function sendToNotion(text) {
 async function sendToGemini(text) {
   const page = pages.Gemini;
   try {
-    const input = page.locator('.ql-editor, [contenteditable="true"], [aria-label*="Gemini"]').first();
-    await input.click();
-    await input.fill(text);
+    const input = page.locator('.ql-editor, [contenteditable="true"], [role="textbox"], textarea').first();
+    await input.click({ timeout: 5000 });
+    await page.keyboard.type(text, { delay: 5 });
     await page.waitForTimeout(300);
     await page.keyboard.press('Enter');
     return '✓';
@@ -150,11 +155,13 @@ async function sendToChatGPT(text) {
 async function sendToClaude(text) {
   const page = pages.Claude;
   try {
-    const input = page.locator('[contenteditable="true"], div.ProseMirror, fieldset p').first();
-    await input.click();
-    await input.fill(text);
-    await page.waitForTimeout(300);
-    await page.keyboard.press('Enter');
+    await page.evaluate((t) => {
+      const editor = document.querySelector('div.tiptap.ProseMirror');
+      editor.focus();
+      document.execCommand('insertText', false, t);
+    }, text);
+    await page.waitForTimeout(500);
+    await page.locator('button[aria-label="메시지 보내기"]').click({ timeout: 3000 });
     return '✓';
   } catch (e) {
     return '✗ ' + e.message.slice(0, 40);
