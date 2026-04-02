@@ -1,0 +1,11 @@
+{
+  "name": "ai-ask",
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "start": "node browser.mjs"
+  },
+  "dependencies": {
+    "playwright": "^1.59.1"
+  }
+}
