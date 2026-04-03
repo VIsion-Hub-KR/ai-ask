@@ -129,7 +129,11 @@ async function sendToGemini(text) {
   try {
     const input = page.locator('.ql-editor, [contenteditable="true"], [role="textbox"], textarea').first();
     await input.click({ timeout: 5000 });
-    await page.keyboard.type(text, { delay: 5 });
+    await page.evaluate((t) => {
+      const editor = document.querySelector('.ql-editor, [contenteditable="true"], [role="textbox"]');
+      editor.focus();
+      document.execCommand('insertText', false, t);
+    }, text);
     await page.waitForTimeout(300);
     await page.keyboard.press('Enter');
     return '✓';
@@ -184,7 +188,92 @@ async function sendToAll(text) {
   }
 }
 
+// ── 답변 수집 ──
+
+async function collectFromNotion() {
+  const page = pages.Notion;
+  try {
+    const text = await page.evaluate(() => {
+      const messages = document.querySelectorAll('[class*="response"], [class*="answer"], [class*="output"], [data-block-id]');
+      const last = messages[messages.length - 1];
+      return last ? last.innerText.trim() : '';
+    });
+    return text || '(답변을 찾을 수 없음)';
+  } catch (e) {
+    return '(수집 실패: ' + e.message.slice(0, 30) + ')';
+  }
+}
+
+async function collectFromGemini() {
+  const page = pages.Gemini;
+  try {
+    const text = await page.evaluate(() => {
+      const all = document.querySelectorAll('[class*="response"], [class*="message"], [class*="model"], [class*="answer"], [class*="markdown"], [class*="content"]');
+      let longest = '';
+      all.forEach(el => {
+        const t = el.innerText.trim();
+        if (t.length > longest.length && el.offsetHeight > 0) longest = t;
+      });
+      return longest;
+    });
+    return text || '(답변을 찾을 수 없음)';
+  } catch (e) {
+    return '(수집 실패: ' + e.message.slice(0, 30) + ')';
+  }
+}
+
+async function collectFromChatGPT() {
+  const page = pages.ChatGPT;
+  try {
+    const text = await page.evaluate(() => {
+      const responses = document.querySelectorAll('[data-message-author-role="assistant"]');
+      const last = responses[responses.length - 1];
+      return last ? last.innerText.trim() : '';
+    });
+    return text || '(답변을 찾을 수 없음)';
+  } catch (e) {
+    return '(수집 실패: ' + e.message.slice(0, 30) + ')';
+  }
+}
+
+async function collectFromClaude() {
+  const page = pages.Claude;
+  try {
+    const text = await page.evaluate(() => {
+      const responses = document.querySelectorAll('[data-is-streaming], .font-claude-message, [class*="response"], [class*="message"]');
+      const last = responses[responses.length - 1];
+      return last ? last.innerText.trim() : '';
+    });
+    return text || '(답변을 찾을 수 없음)';
+  } catch (e) {
+    return '(수집 실패: ' + e.message.slice(0, 30) + ')';
+  }
+}
+
+async function collectAll() {
+  console.log('\n📋 답변 수집 중...');
+
+  const [notion, gemini, chatgpt, claude] = await Promise.all([
+    collectFromNotion(),
+    collectFromGemini(),
+    collectFromChatGPT(),
+    collectFromClaude(),
+  ]);
+
+  const result = `<답변1>\n${notion}\n</답변1>\n\n<답변2>\n${gemini}\n</답변2>\n\n<답변3>\n${chatgpt}\n</답변3>\n\n<답변4>\n${claude}\n</답변4>`;
+
+  execSync(`pbcopy`, { input: result });
+
+  console.log('  ✅ 4개 AI 답변이 클립보드에 복사되었습니다!');
+  console.log(`  Notion: ${notion.slice(0, 50)}...`);
+  console.log(`  Gemini: ${gemini.slice(0, 50)}...`);
+  console.log(`  ChatGPT: ${chatgpt.slice(0, 50)}...`);
+  console.log(`  Claude: ${claude.slice(0, 50)}...`);
+}
+
 // ── 클립보드 감시 ──
+
+const COLLECT_PREFIX = '!!';
 
 function getClipboard() {
   try {
@@ -198,7 +287,8 @@ let lastClipboard = getClipboard();
 
 console.log('════════════════════════════════════════');
 console.log('  AI Ask 준비 완료!');
-console.log('  !를 붙여서 복사하면 4개 AI에 동시 전송');
+console.log('  !질문      → 4개 AI에 동시 전송');
+console.log('  !! (Ctrl+Cmd+M) → 4개 AI 답변 수집');
 console.log('  예: !봄에 대한 시 써줘');
 console.log('  종료: Ctrl+C');
 console.log('════════════════════════════════════════\n');
@@ -210,7 +300,12 @@ setInterval(async () => {
   const current = getClipboard();
   if (current && current !== lastClipboard) {
     lastClipboard = current;
-    if (current.startsWith(TRIGGER_PREFIX)) {
+    if (current === COLLECT_PREFIX) {
+      busy = true;
+      await collectAll();
+      lastClipboard = getClipboard();
+      busy = false;
+    } else if (current.startsWith(TRIGGER_PREFIX)) {
       const question = current.slice(TRIGGER_PREFIX.length).trim();
       if (question) {
         busy = true;
