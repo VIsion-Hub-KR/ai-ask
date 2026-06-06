@@ -145,7 +145,9 @@ async function sendToGemini(text) {
 async function sendToChatGPT(text) {
   const page = pages.ChatGPT;
   try {
-    const input = page.locator('#prompt-textarea, [id="prompt-textarea"] p, div[contenteditable="true"]').first();
+    // ChatGPT 진짜 입력칸(#prompt-textarea)만 정확히 지정.
+    // div[contenteditable="true"] 같은 느슨한 셀렉터는 캔버스/"메시지" 박스를 잘못 잡으므로 제외.
+    const input = page.locator('#prompt-textarea').first();
     await input.click();
     await input.fill(text);
     await page.waitForTimeout(300);
