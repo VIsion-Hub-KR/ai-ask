@@ -2,14 +2,25 @@
   "name": "ai-ask",
   "version": "1.0.0",
   "description": "Ask 4 AIs simultaneously - Notion AI, Gemini, ChatGPT, Claude",
-  "main": "src/main.cjs",
+  "main": "main.cjs",
   "scripts": {
-    "start": "node browser.mjs",
-    "electron": "electron .",
+    "start": "electron .",
+    "cli": "node browser.mjs",
     "dist": "electron-builder"
   },
   "dependencies": {
     "playwright": "^1.59.1"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "electron",
+      "electron-builder",
+      "esbuild"
+    ]
+  },
+  "devDependencies": {
+    "electron": "^33.4.11",
+    "electron-builder": "^25.1.8"
   },
   "build": {
     "appId": "ai.orot.ai-ask",
@@ -23,7 +34,11 @@
       "category": "public.app-category.productivity"
     },
     "files": [
-      "src/**/*",
+      "main.cjs",
+      "preload.cjs",
+      "index.html",
+      "ai-controller.cjs",
+      "browser.mjs",
       "assets/**/*",
       "node_modules/**/*"
     ],
