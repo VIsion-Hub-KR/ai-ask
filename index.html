@@ -51,7 +51,7 @@
   aiAsk.list.forEach(a => {
     const b = document.createElement('button');
     b.className = 'ai';
-    b.textContent = a.name + ' ×4';
+    b.textContent = a.name;
     b.onclick = () => aiAsk.launchSolo(a.key);
     grid.appendChild(b);
     btns[a.key] = b;
