@@ -14,6 +14,10 @@ const COLLECT_PREFIX = '!!';
 const PROFILE_DIR = `${homedir()}/.ai-ask/profile`;
 const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 
+// Finder로 띄운 .app은 UTF-8 로케일(LANG)이 없어 pbpaste/pbcopy가 한글을
+// EUC-KR로 처리 → 깨짐. 클립보드 exec 호출에 UTF-8 로케일을 강제한다.
+const UTF8_ENV = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' };
+
 const AI_LIST = [
   { key: 'notion',  name: 'Notion',  url: 'https://www.notion.so/ai' },
   { key: 'gemini',  name: 'Gemini',  url: 'https://gemini.google.com/app' },
@@ -214,7 +218,7 @@ async function launchMulti() {
   for (const key of Object.keys(pages)) byName[key.split('#')[0]] = pages[key];
 
   function getClipboard() {
-    try { return execSync('pbpaste', { encoding: 'utf-8' }).trim(); } catch { return ''; }
+    try { return execSync('pbpaste', { encoding: 'utf-8', env: UTF8_ENV }).trim(); } catch { return ''; }
   }
   let last = getClipboard();
   let busy = false;
@@ -233,7 +237,7 @@ async function launchMulti() {
     const entries = Object.entries(byName);
     const parts = await Promise.all(entries.map(([n, p]) => COLLECTORS[n](p)));
     const out = parts.map((t, i) => `<답변${i + 1}>\n${t}\n</답변${i + 1}>`).join('\n\n');
-    execSync('pbcopy', { input: out });
+    execSync('pbcopy', { input: out, env: UTF8_ENV });
     console.log('  ✅ 4개 AI 답변이 클립보드에 복사되었습니다!');
   }
 
