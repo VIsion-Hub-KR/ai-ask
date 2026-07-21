@@ -10,7 +10,7 @@ let running = false;
 function createWindow() {
   win = new BrowserWindow({
     width: 400,
-    height: 560,
+    height: 480,
     resizable: false,
     fullscreenable: false,
     title: 'AI Ask',
@@ -24,6 +24,14 @@ function createWindow() {
     },
   });
   win.loadFile('index.html');
+
+  // 내용 높이에 창을 딱 맞춘다 (아래 여백 제거). 버튼 수가 바뀌어도 자동.
+  win.webContents.on('did-finish-load', async () => {
+    try {
+      const h = await win.webContents.executeJavaScript('document.documentElement.scrollHeight');
+      if (win && !win.isDestroyed()) win.setContentSize(400, Math.max(300, Math.ceil(h)));
+    } catch {}
+  });
 
   controller.onStatus((s) => {
     running = s.running;
