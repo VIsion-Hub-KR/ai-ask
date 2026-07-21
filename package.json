@@ -11,13 +11,6 @@
   "dependencies": {
     "playwright": "^1.59.1"
   },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "electron",
-      "electron-builder",
-      "esbuild"
-    ]
-  },
   "devDependencies": {
     "electron": "^33.4.11",
     "electron-builder": "^25.1.8"
