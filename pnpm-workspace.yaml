@@ -1,6 +1,6 @@
 # electron/electron-builder는 설치 시 바이너리 다운로드(빌드 스크립트)가 필요하다.
-# pnpm이 기본으로 막으므로 여기서 허용해야 `pnpm install`만으로 앱이 실행된다.
-onlyBuiltDependencies:
-  - electron
-  - electron-builder
-  - esbuild
+# pnpm 11이 기본으로 막으므로 여기서 허용해야 `pnpm install`만으로 앱이 실행된다.
+allowBuilds:
+  electron: true
+  electron-builder: true
+  esbuild: true
