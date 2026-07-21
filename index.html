@@ -10,16 +10,25 @@
   h1 { font-size:17px; }
   .brand p { font-size:11px; color:#7a8494; margin-top:1px; }
   .lbl { font-size:11px; font-weight:700; color:#8a93a2; margin:14px 2px 8px; }
-  #multi { width:100%; height:50px; border:0; border-radius:11px; background:linear-gradient(#0a4a86,#073967); color:#fff; font-size:15px; font-weight:700; cursor:pointer; }
+  #multi { width:100%; height:50px; border:0; border-radius:11px; background:linear-gradient(#0a4a86,#073967); color:#fff; font-size:15px; font-weight:700; cursor:pointer; transition:transform .06s ease, filter .15s ease, box-shadow .15s ease; box-shadow:0 2px 6px rgba(7,57,103,.25); }
+  #multi:hover { filter:brightness(1.08); }
+  #multi:active { transform:translateY(1px) scale(.985); box-shadow:0 1px 3px rgba(7,57,103,.3); }
   .desc { font-size:11px; color:#8a93a2; margin:7px 2px 0; line-height:1.5; }
   .desc b { color:#073967; }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:4px; }
-  .ai { height:44px; border:1.5px solid #e2e6ec; border-radius:10px; background:#fff; cursor:pointer; font-size:13px; font-weight:600; color:#2a3342; }
+  .ai { height:44px; border:1.5px solid #e2e6ec; border-radius:10px; background:#fff; cursor:pointer; font-size:13px; font-weight:600; color:#2a3342; transition:transform .06s ease, background .12s ease, border-color .12s ease, box-shadow .12s ease; }
+  .ai:hover { border-color:#b9c2cd; background:#fbfcfd; }
+  .ai:active { transform:scale(.96); background:#eef1f4; }
+  /* 현재 열려 있는 AI = 녹색 */
+  .ai.open { border-color:#10a37f; background:#eafaf5; color:#0b7a5e; box-shadow:0 0 0 3px rgba(16,163,127,.12); }
+  .ai.open:hover { background:#e2f6ef; }
   .bar { margin-top:18px; display:flex; align-items:center; justify-content:space-between; background:#eef1f4; border-radius:9px; padding:10px 12px; }
   .st { display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color:#4a5362; }
   .led { width:9px; height:9px; border-radius:50%; background:#c2c8d0; }
   .led.on { background:#28c840; box-shadow:0 0 0 3px rgba(40,200,64,.18); }
-  #quit { border:0; background:#e3e7ec; color:#5b6473; font-size:12px; font-weight:700; padding:7px 14px; border-radius:7px; cursor:pointer; }
+  #quit { border:0; background:#e3e7ec; color:#5b6473; font-size:12px; font-weight:700; padding:7px 14px; border-radius:7px; cursor:pointer; transition:transform .06s ease, filter .12s ease; }
+  #quit:hover { filter:brightness(.96); }
+  #quit:active { transform:scale(.94); }
 </style>
 </head>
 <body>
@@ -63,6 +72,9 @@
   // 실행 중에도 버튼은 계속 활성 — 같은 세션에 창을 더 추가할 수 있다.
   aiAsk.onStatus(s => {
     led.classList.toggle('on', s.running);
+    // 현재 열려 있는 AI 버튼을 녹색으로
+    const open = new Set(s.openAis || []);
+    Object.entries(btns).forEach(([k, b]) => b.classList.toggle('open', s.running && open.has(k)));
     if (s.running) {
       stx.textContent = s.mode === 'solo'
         ? '실행 중 · ' + (btns[s.ai] ? btns[s.ai].textContent : '')

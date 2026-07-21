@@ -49,9 +49,24 @@ let sessionWindows = [];
 // AI별로 각 창(0~3)에 연 탭. openedTabs[aiKey][windowIndex] = page | null
 // 버튼을 누르면: 그 AI 탭이 없는 창엔 새로 열고, 이미 있으면 그 탭을 맨 앞으로.
 let openedTabs = {};
+let sessionMode = null;   // 'multi' | 'solo' (상태바 표시용)
+let sessionAi = null;     // solo로 시작했을 때의 AI 키
 
 function isRunning() { return context !== null; }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// 현재 살아 있는 탭이 하나라도 있는 AI 키 목록 (버튼 녹색 표시용)
+function openAiKeys() {
+  return Object.keys(openedTabs).filter(k => (openedTabs[k] || []).some(p => p && !p.isClosed()));
+}
+function emitStatus() {
+  emit({
+    running: isRunning(),
+    mode: sessionMode,
+    ai: sessionAi,
+    openAis: isRunning() ? openAiKeys() : [],
+  });
+}
 
 async function ensureContext() {
   if (context) return context;
@@ -268,11 +283,14 @@ async function launchMulti() {
       for (const p of sessionWindows) {
         if (p && !p.isClosed()) { try { await p.bringToFront(); } catch {} }
       }
+      emitStatus();
       return;
     }
 
     const pages = await openSplitWindows(specs);
     sessionWindows = pages;
+    sessionMode = 'multi';
+    sessionAi = null;
 
     // 세션 탭 기록 초기화 — 각 AI는 자기 창(i)에만 첫 탭이 있다.
     openedTabs = {};
@@ -323,7 +341,7 @@ async function launchMulti() {
       }
     }, 1000);
 
-    emit({ running: true, mode: 'multi', ai: null });
+    emitStatus();
   } finally {
     launching = false;
   }
@@ -338,14 +356,16 @@ async function launchSolo(aiName) {
   launching = true;
   try {
     // 실행 중이면: 이 AI 탭을 없는 창엔 열고, 모든 창에서 맨 앞으로 (열려 있으면 그냥 전환)
-    if (isRunning()) { await showOrOpen(ai.key, ai.url); return; }
+    if (isRunning()) { await showOrOpen(ai.key, ai.url); emitStatus(); return; }
 
     const specs = Array.from({ length: 4 }, () => ({ name: ai.name, url: ai.url }));
     const pages = await openSplitWindows(specs);
     sessionWindows = pages;
+    sessionMode = 'solo';
+    sessionAi = ai.key;
     openedTabs = {};
     openedTabs[ai.key] = pages.slice();   // 4개 창 모두 이 AI가 첫 탭
-    emit({ running: true, mode: 'solo', ai: ai.key });
+    emitStatus();
   } finally {
     launching = false;
   }
@@ -356,8 +376,10 @@ async function stop() {
   if (context) { try { await context.close(); } catch {} context = null; }
   sessionWindows = [];
   openedTabs = {};
+  sessionMode = null;
+  sessionAi = null;
   launching = false;
-  emit({ running: false, mode: null, ai: null });
+  emit({ running: false, mode: null, ai: null, openAis: [] });
 }
 
 module.exports = { AI_LIST, resolveSolo, launchMulti, launchSolo, stop, onStatus };
