@@ -42,19 +42,12 @@ let statusCb = () => {};
 function onStatus(cb) { statusCb = cb; }
 function emit(s) { try { statusCb(s); } catch {} }
 
-// 이번 세션에서 지금까지 연 창 수 (첫 세트=4분할 타일, 이후 추가 세트=살짝 어긋난 캐스케이드 배치)
-let openedCount = 0;
 // 창 생성 중복 실행(레이스) 방지 — 같은 프로필로 두 번째 크롬을 켜려다 충돌하는 것 차단
 let launching = false;
+// 첫 세트로 띄운 4분할 창들의 첫 탭 페이지. 이후 '추가'는 이 4개 창에 새 탭으로 붙인다.
+let sessionWindows = [];
 
 function isRunning() { return context !== null; }
-
-// 추가 세트 창의 배치: 화면 중앙 근처에 8칸 주기로 살짝씩 어긋나게 쌓는다 (사용자가 옮기기 쉽게)
-function cascadeBounds(n) {
-  const step = 36;
-  const k = n % 8;
-  return { left: 220 + k * step, top: 70 + k * step, width: 820, height: 1040 };
-}
 
 async function ensureContext() {
   if (context) return context;
@@ -72,32 +65,28 @@ async function ensureContext() {
   return context;
 }
 
-// 현재 세션(컨텍스트)에 창 세트를 연다.
-// 첫 세트(openedCount===0)는 4분할 타일, 이후 세트는 캐스케이드 배치.
-// specs: [{name,url}]. 반환: { "name#globalIndex": page }
-async function openSet(specs) {
+// 첫 세트: 화면 4분할(positions)로 창 4개를 연다. 반환: 순서대로의 page 배열.
+async function openSplitWindows(specs) {
   await ensureContext();
-  const tiled = openedCount === 0;
-  const pages = {};
+  const pages = [];
   for (let i = 0; i < specs.length; i++) {
     const { name, url } = specs[i];
     let page;
 
-    if (openedCount === 0 && i === 0) {
+    if (i === 0) {
       page = context.pages()[0] || await context.newPage();
     } else {
       const cdp = await context.newCDPSession(context.pages()[0]);
       await cdp.send('Target.createTarget', { url: 'about:blank', newWindow: true });
       await new Promise(r => setTimeout(r, 500));
       const all = context.pages();
-      page = all.find(p => p.url() === 'about:blank' && !Object.values(pages).includes(p))
+      page = all.find(p => p.url() === 'about:blank' && !pages.includes(p))
         || all[all.length - 1];
     }
 
-    const bounds = tiled ? positions[i] : cascadeBounds(openedCount);
     const s = await context.newCDPSession(page);
     const { windowId } = await s.send('Browser.getWindowForTarget');
-    await s.send('Browser.setWindowBounds', { windowId, bounds });
+    await s.send('Browser.setWindowBounds', { windowId, bounds: positions[i] });
 
     try {
       await page.goto(url, { waitUntil: 'load', timeout: 20000 });
@@ -105,11 +94,30 @@ async function openSet(specs) {
       console.log(`  ⚠ ${name} (계속)`);
     }
     await page.waitForTimeout(1000);
-    pages[`${name}#${openedCount}`] = page;
-    openedCount++;
+    pages.push(page);
     console.log(`  ✓ ${name}`);
   }
   return pages;
+}
+
+// 실행 중 추가: 이미 떠 있는 4개 창 각각에 새 탭으로 연다. specs[i] → sessionWindows[i].
+// (solo 추가면 4창 모두 같은 AI 탭, multi 추가면 창별로 순서대로)
+async function addTabsToWindows(specs) {
+  if (!context) return;
+  for (let i = 0; i < specs.length && i < sessionWindows.length; i++) {
+    const anchor = sessionWindows[i];
+    if (!anchor || anchor.isClosed()) continue;
+    const { name, url } = specs[i];
+    try {
+      await anchor.bringToFront();            // 해당 창을 맨 앞으로
+      await new Promise(r => setTimeout(r, 150));
+      const cdp = await context.newCDPSession(anchor);
+      await cdp.send('Target.createTarget', { url, newWindow: false }); // 그 창에 새 탭
+      console.log(`  ➕ ${name} (탭)`);
+    } catch (e) {
+      console.log(`  ⚠ ${name} 탭 추가 실패: ${e.message.slice(0, 40)}`);
+    }
+  }
 }
 
 // ── 각 AI 전송 (셀렉터는 기존 browser.mjs와 동일) ──
@@ -239,14 +247,17 @@ async function launchMulti() {
   if (launching) return;
   launching = true;
   try {
-    const fresh = !isRunning();
-    const pages = await openSet(AI_LIST.map(a => ({ name: a.name, url: a.url })));
+    const specs = AI_LIST.map(a => ({ name: a.name, url: a.url }));
 
-    // 실행 중 추가 호출이면 창만 더 띄우고(독립) 끝낸다. 감시는 첫 세트에만 붙는다.
-    if (!fresh) return;
+    // 실행 중이면 기존 4창에 탭으로 추가하고 끝낸다. 감시는 첫 세트에만 붙는다.
+    if (isRunning()) { await addTabsToWindows(specs); return; }
 
+    const pages = await openSplitWindows(specs);
+    sessionWindows = pages;
+
+    // 모드1 브로드캐스트 대상 = 4분할 창의 첫 탭들 (창 순서 = AI_LIST 순서)
     const byName = {};
-    for (const key of Object.keys(pages)) byName[key.split('#')[0]] = pages[key];
+    AI_LIST.forEach((a, i) => { byName[a.name] = pages[i]; });
 
     function getClipboard() {
       try { return execSync('pbpaste', { encoding: 'utf-8', env: UTF8_ENV }).trim(); } catch { return ''; }
@@ -300,10 +311,14 @@ async function launchSolo(aiName) {
   if (launching) return;
   launching = true;
   try {
-    const fresh = !isRunning();
-    // openSet이 첫 세트면 4분할 타일, 추가 세트면 캐스케이드로 알아서 배치
-    await openSet(Array.from({ length: 4 }, () => ({ name: ai.name, url: ai.url })));
-    if (fresh) emit({ running: true, mode: 'solo', ai: ai.key });
+    const specs = Array.from({ length: 4 }, () => ({ name: ai.name, url: ai.url }));
+
+    // 실행 중이면 기존 4창에 이 AI를 탭으로 추가
+    if (isRunning()) { await addTabsToWindows(specs); return; }
+
+    const pages = await openSplitWindows(specs);
+    sessionWindows = pages;
+    emit({ running: true, mode: 'solo', ai: ai.key });
   } finally {
     launching = false;
   }
@@ -312,7 +327,7 @@ async function launchSolo(aiName) {
 async function stop() {
   if (clipboardTimer) { clearInterval(clipboardTimer); clipboardTimer = null; }
   if (context) { try { await context.close(); } catch {} context = null; }
-  openedCount = 0;
+  sessionWindows = [];
   launching = false;
   emit({ running: false, mode: null, ai: null });
 }
