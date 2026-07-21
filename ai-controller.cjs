@@ -42,9 +42,22 @@ let statusCb = () => {};
 function onStatus(cb) { statusCb = cb; }
 function emit(s) { try { statusCb(s); } catch {} }
 
-// ── 창 4개 띄우기 (공통) ──
-// windowSpecs: [{name,url}] 길이 4. 반환: { "name#index": page }
-async function openWindows(windowSpecs) {
+// 이번 세션에서 지금까지 연 창 수 (첫 세트=4분할 타일, 이후 추가 세트=살짝 어긋난 캐스케이드 배치)
+let openedCount = 0;
+// 창 생성 중복 실행(레이스) 방지 — 같은 프로필로 두 번째 크롬을 켜려다 충돌하는 것 차단
+let launching = false;
+
+function isRunning() { return context !== null; }
+
+// 추가 세트 창의 배치: 화면 중앙 근처에 8칸 주기로 살짝씩 어긋나게 쌓는다 (사용자가 옮기기 쉽게)
+function cascadeBounds(n) {
+  const step = 36;
+  const k = n % 8;
+  return { left: 220 + k * step, top: 70 + k * step, width: 820, height: 1040 };
+}
+
+async function ensureContext() {
+  if (context) return context;
   mkdirSync(PROFILE_DIR, { recursive: true });
   context = await chromium.launchPersistentContext(PROFILE_DIR, {
     headless: false,
@@ -56,13 +69,21 @@ async function openWindows(windowSpecs) {
     ],
     viewport: null,
   });
+  return context;
+}
 
+// 현재 세션(컨텍스트)에 창 세트를 연다.
+// 첫 세트(openedCount===0)는 4분할 타일, 이후 세트는 캐스케이드 배치.
+// specs: [{name,url}]. 반환: { "name#globalIndex": page }
+async function openSet(specs) {
+  await ensureContext();
+  const tiled = openedCount === 0;
   const pages = {};
-  for (let i = 0; i < windowSpecs.length; i++) {
-    const { name, url } = windowSpecs[i];
+  for (let i = 0; i < specs.length; i++) {
+    const { name, url } = specs[i];
     let page;
 
-    if (i === 0) {
+    if (openedCount === 0 && i === 0) {
       page = context.pages()[0] || await context.newPage();
     } else {
       const cdp = await context.newCDPSession(context.pages()[0]);
@@ -73,9 +94,10 @@ async function openWindows(windowSpecs) {
         || all[all.length - 1];
     }
 
+    const bounds = tiled ? positions[i] : cascadeBounds(openedCount);
     const s = await context.newCDPSession(page);
     const { windowId } = await s.send('Browser.getWindowForTarget');
-    await s.send('Browser.setWindowBounds', { windowId, bounds: positions[i] });
+    await s.send('Browser.setWindowBounds', { windowId, bounds });
 
     try {
       await page.goto(url, { waitUntil: 'load', timeout: 20000 });
@@ -83,7 +105,8 @@ async function openWindows(windowSpecs) {
       console.log(`  ⚠ ${name} (계속)`);
     }
     await page.waitForTimeout(1000);
-    pages[`${name}#${i}`] = page;
+    pages[`${name}#${openedCount}`] = page;
+    openedCount++;
     console.log(`  ✓ ${name}`);
   }
   return pages;
@@ -213,49 +236,60 @@ const COLLECTORS = { Notion: collectFromNotion, Gemini: collectFromGemini, ChatG
 // ── 모드 1: 4개 AI + 클립보드 감시 ──
 
 async function launchMulti() {
-  const pages = await openWindows(AI_LIST.map(a => ({ name: a.name, url: a.url })));
-  const byName = {};
-  for (const key of Object.keys(pages)) byName[key.split('#')[0]] = pages[key];
+  if (launching) return;
+  launching = true;
+  try {
+    const fresh = !isRunning();
+    const pages = await openSet(AI_LIST.map(a => ({ name: a.name, url: a.url })));
 
-  function getClipboard() {
-    try { return execSync('pbpaste', { encoding: 'utf-8', env: UTF8_ENV }).trim(); } catch { return ''; }
-  }
-  let last = getClipboard();
-  let busy = false;
+    // 실행 중 추가 호출이면 창만 더 띄우고(독립) 끝낸다. 감시는 첫 세트에만 붙는다.
+    if (!fresh) return;
 
-  async function sendToAll(text) {
-    const preview = text.length > 60 ? text.slice(0, 60) + '...' : text;
-    console.log(`\n📨 "${preview}"`);
-    const results = await Promise.all(
-      Object.entries(byName).map(([n, p]) => SENDERS[n](p, text).then(r => [n, r]))
-    );
-    for (const [n, r] of results) console.log(`  ${r} ${n}`);
-  }
+    const byName = {};
+    for (const key of Object.keys(pages)) byName[key.split('#')[0]] = pages[key];
 
-  async function collectAll() {
-    console.log('\n📋 답변 수집 중...');
-    const entries = Object.entries(byName);
-    const parts = await Promise.all(entries.map(([n, p]) => COLLECTORS[n](p)));
-    const out = parts.map((t, i) => `<답변${i + 1}>\n${t}\n</답변${i + 1}>`).join('\n\n');
-    execSync('pbcopy', { input: out, env: UTF8_ENV });
-    console.log('  ✅ 4개 AI 답변이 클립보드에 복사되었습니다!');
-  }
-
-  clipboardTimer = setInterval(async () => {
-    if (busy) return;
-    const cur = getClipboard();
-    if (cur && cur !== last) {
-      last = cur;
-      if (cur === COLLECT_PREFIX) {
-        busy = true; await collectAll(); last = getClipboard(); busy = false;
-      } else if (cur.startsWith(TRIGGER_PREFIX)) {
-        const q = cur.slice(TRIGGER_PREFIX.length).trim();
-        if (q) { busy = true; await sendToAll(q); busy = false; }
-      }
+    function getClipboard() {
+      try { return execSync('pbpaste', { encoding: 'utf-8', env: UTF8_ENV }).trim(); } catch { return ''; }
     }
-  }, 1000);
+    let last = getClipboard();
+    let busy = false;
 
-  emit({ running: true, mode: 'multi', ai: null });
+    async function sendToAll(text) {
+      const preview = text.length > 60 ? text.slice(0, 60) + '...' : text;
+      console.log(`\n📨 "${preview}"`);
+      const results = await Promise.all(
+        Object.entries(byName).map(([n, p]) => SENDERS[n](p, text).then(r => [n, r]))
+      );
+      for (const [n, r] of results) console.log(`  ${r} ${n}`);
+    }
+
+    async function collectAll() {
+      console.log('\n📋 답변 수집 중...');
+      const entries = Object.entries(byName);
+      const parts = await Promise.all(entries.map(([n, p]) => COLLECTORS[n](p)));
+      const out = parts.map((t, i) => `<답변${i + 1}>\n${t}\n</답변${i + 1}>`).join('\n\n');
+      execSync('pbcopy', { input: out, env: UTF8_ENV });
+      console.log('  ✅ 4개 AI 답변이 클립보드에 복사되었습니다!');
+    }
+
+    clipboardTimer = setInterval(async () => {
+      if (busy) return;
+      const cur = getClipboard();
+      if (cur && cur !== last) {
+        last = cur;
+        if (cur === COLLECT_PREFIX) {
+          busy = true; await collectAll(); last = getClipboard(); busy = false;
+        } else if (cur.startsWith(TRIGGER_PREFIX)) {
+          const q = cur.slice(TRIGGER_PREFIX.length).trim();
+          if (q) { busy = true; await sendToAll(q); busy = false; }
+        }
+      }
+    }, 1000);
+
+    emit({ running: true, mode: 'multi', ai: null });
+  } finally {
+    launching = false;
+  }
 }
 
 // ── 모드 2: 같은 AI 4개, 감시 없음 ──
@@ -263,13 +297,23 @@ async function launchMulti() {
 async function launchSolo(aiName) {
   const ai = resolveSolo(aiName);
   if (!ai) throw new Error('알 수 없는 AI: ' + aiName);
-  await openWindows(Array.from({ length: 4 }, () => ({ name: ai.name, url: ai.url })));
-  emit({ running: true, mode: 'solo', ai: ai.key });
+  if (launching) return;
+  launching = true;
+  try {
+    const fresh = !isRunning();
+    // openSet이 첫 세트면 4분할 타일, 추가 세트면 캐스케이드로 알아서 배치
+    await openSet(Array.from({ length: 4 }, () => ({ name: ai.name, url: ai.url })));
+    if (fresh) emit({ running: true, mode: 'solo', ai: ai.key });
+  } finally {
+    launching = false;
+  }
 }
 
 async function stop() {
   if (clipboardTimer) { clearInterval(clipboardTimer); clipboardTimer = null; }
   if (context) { try { await context.close(); } catch {} context = null; }
+  openedCount = 0;
+  launching = false;
   emit({ running: false, mode: null, ai: null });
 }
 

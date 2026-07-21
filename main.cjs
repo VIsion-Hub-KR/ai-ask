@@ -5,7 +5,6 @@ const { homedir } = require('os');
 const controller = require('./ai-controller.cjs');
 
 let win = null;
-let running = false;
 
 function createWindow() {
   win = new BrowserWindow({
@@ -34,7 +33,6 @@ function createWindow() {
   });
 
   controller.onStatus((s) => {
-    running = s.running;
     if (win && !win.isDestroyed()) win.webContents.send('status', s);
   });
 }
@@ -45,14 +43,12 @@ function clearLock() {
 }
 
 ipcMain.handle('launch-multi', async () => {
-  if (running) return { ok: false, reason: 'busy' };
   clearLock();
   await controller.launchMulti();
   return { ok: true };
 });
 
 ipcMain.handle('launch-solo', async (_e, key) => {
-  if (running) return { ok: false, reason: 'busy' };
   clearLock();
   await controller.launchSolo(key);
   return { ok: true };
