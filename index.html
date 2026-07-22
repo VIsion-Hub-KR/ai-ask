@@ -178,12 +178,18 @@
         const opt = document.createElement('option');
         opt.value = a.key;
         opt.textContent = labelOf(a);
-        // 다른 자리에서 이미 고른 모델은 비활성 (중복 선택 방지)
-        if (order.some((k, j) => j !== i && k === a.key)) opt.disabled = true;
         if (a.key === key) opt.selected = true;
         sel.appendChild(opt);
       });
-      sel.onchange = () => { order[i] = sel.value; saveOrder(); buildSlots(); };
+      // 이미 다른 자리에 있는 모델을 고르면 두 자리를 맞바꾼다 (중복 없이 순서 변경).
+      sel.onchange = () => {
+        const picked = sel.value;
+        const j = order.findIndex((k, idx) => idx !== i && k === picked);
+        if (j !== -1) order[j] = order[i];
+        order[i] = picked;
+        saveOrder();
+        buildSlots();
+      };
       row.appendChild(n);
       row.appendChild(sel);
       slotsEl.appendChild(row);

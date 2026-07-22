@@ -20,12 +20,14 @@ const UTF8_ENV = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' };
 
 // send: 클립보드 전송/수집(모드 1) 지원 여부. false면 창만 열리고 !질문·!!에서 건너뜀.
 const AI_LIST = [
-  { key: 'notion',     name: 'Notion',     url: 'https://www.notion.so/ai',       send: true },
-  { key: 'gemini',     name: 'Gemini',     url: 'https://gemini.google.com/app',  send: true },
-  { key: 'chatgpt',    name: 'ChatGPT',    url: 'https://chatgpt.com',            send: true },
-  { key: 'claude',     name: 'Claude',     url: 'https://claude.ai',              send: true },
-  { key: 'perplexity', name: 'Perplexity', url: 'https://www.perplexity.ai',      send: false },
-  { key: 'grok',       name: 'Grok',       url: 'https://grok.com',               send: false },
+  { key: 'notion',     name: 'Notion',     url: 'https://www.notion.so/ai',                 send: true },
+  { key: 'gemini',     name: 'Gemini',     url: 'https://gemini.google.com/app',            send: true },
+  { key: 'chatgpt',    name: 'ChatGPT',    url: 'https://chatgpt.com',                      send: true },
+  { key: 'claude',     name: 'Claude',     url: 'https://claude.ai',                        send: true },
+  { key: 'perplexity', name: 'Perplexity', url: 'https://www.perplexity.ai',                send: true },
+  { key: 'grok',       name: 'Grok',       url: 'https://grok.com',                         send: true },
+  { key: 'genspark',   name: 'Genspark',   url: 'https://www.genspark.ai',                  send: true },
+  { key: 'aistudio',   name: 'AI Studio',  url: 'https://aistudio.google.com/prompts/new_chat', send: true },
 ];
 
 // 창을 띄울 대상 영역(area = {x,y,width,height}, 보통 선택 모니터의 작업 영역).
@@ -225,7 +227,44 @@ async function sendToClaude(page, text) {
   }
 }
 
-const SENDERS = { notion: sendToNotion, gemini: sendToGemini, chatgpt: sendToChatGPT, claude: sendToClaude };
+// 범용 전송 — 보이는 입력창(textarea 우선, 없으면 contenteditable/textbox)을 찾아 넣고 submitKey로 전송.
+// 실측 근거: 퍼플렉시티=contenteditable, 그록·젠스파크=textarea(모두 Enter), AI Studio=textarea(Meta+Enter).
+async function sendGeneric(page, text, submitKey) {
+  try {
+    const handle = await page.evaluateHandle(() => {
+      const vis = e => e && e.offsetHeight > 0 && e.getAttribute('aria-hidden') !== 'true' && !e.disabled;
+      const ta = [...document.querySelectorAll('textarea')].filter(vis);
+      if (ta.length) return ta[0];
+      const ce = [...document.querySelectorAll('[contenteditable="true"], [role="textbox"]')].filter(vis);
+      return ce[0] || null;
+    });
+    const node = handle.asElement();
+    if (!node) return '✗ 입력창 없음';
+    await node.scrollIntoViewIfNeeded().catch(() => {});
+    await node.click();
+    const tag = await node.evaluate(n => n.tagName);
+    if (tag === 'TEXTAREA' || tag === 'INPUT') {
+      await node.fill(text);                                   // Angular/React 바인딩까지 input 이벤트 발생
+    } else {
+      await node.evaluate((n, t) => { n.focus(); document.execCommand('insertText', false, t); }, text);
+    }
+    await page.waitForTimeout(300);
+    await page.keyboard.press(submitKey);
+    return '✓';
+  } catch (e) {
+    return '✗ ' + e.message.slice(0, 40);
+  }
+}
+
+const sendToPerplexity = (p, t) => sendGeneric(p, t, 'Enter');
+const sendToGrok       = (p, t) => sendGeneric(p, t, 'Enter');
+const sendToGenspark   = (p, t) => sendGeneric(p, t, 'Enter');
+const sendToAIStudio   = (p, t) => sendGeneric(p, t, 'Meta+Enter');   // AI Studio는 ⌘+Enter로 실행
+
+const SENDERS = {
+  notion: sendToNotion, gemini: sendToGemini, chatgpt: sendToChatGPT, claude: sendToClaude,
+  perplexity: sendToPerplexity, grok: sendToGrok, genspark: sendToGenspark, aistudio: sendToAIStudio,
+};
 
 // ── 각 AI 답변 수집 ──
 
@@ -281,7 +320,28 @@ async function collectFromClaude(page) {
   }
 }
 
-const COLLECTORS = { notion: collectFromNotion, gemini: collectFromGemini, chatgpt: collectFromChatGPT, claude: collectFromClaude };
+// 범용 수집 — 답변으로 보이는 컨테이너 중 가장 긴 보이는 텍스트를 취한다(기존 Gemini 수집과 동일 휴리스틱).
+// 답변 화면을 실측 검증하지 못한 4개(퍼플렉시티·그록·젠스파크·AI Studio)에 공통 적용, 실사용 테스트로 보정 예정.
+async function collectGeneric(page) {
+  try {
+    return (await page.evaluate(() => {
+      const sel = '[class*="prose"],[class*="markdown"],[class*="message"],[class*="response"],[class*="answer"],[class*="turn"],[class*="content"]';
+      let best = '';
+      document.querySelectorAll(sel).forEach(el => {
+        const t = (el.innerText || '').trim();
+        if (t.length > best.length && el.offsetHeight > 0) best = t;
+      });
+      return best;
+    })) || '(답변을 찾을 수 없음)';
+  } catch (e) {
+    return '(수집 실패: ' + e.message.slice(0, 30) + ')';
+  }
+}
+
+const COLLECTORS = {
+  notion: collectFromNotion, gemini: collectFromGemini, chatgpt: collectFromChatGPT, claude: collectFromClaude,
+  perplexity: collectGeneric, grok: collectGeneric, genspark: collectGeneric, aistudio: collectGeneric,
+};
 
 // ── 모드 1: 4개 AI + 클립보드 감시 ──
 
