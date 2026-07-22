@@ -15,6 +15,12 @@
   #multi:active { transform:translateY(1px) scale(.985); box-shadow:0 1px 3px rgba(7,57,103,.3); }
   .desc { font-size:11px; color:#8a93a2; margin:7px 2px 0; line-height:1.5; }
   .desc b { color:#073967; }
+  /* 모드 1 · 자리별 모델 선택 (왼쪽부터 1~4번) */
+  #slots { margin-bottom:9px; }
+  .slot { display:flex; align-items:center; gap:8px; margin-bottom:7px; }
+  .slot .n { flex:0 0 auto; width:20px; height:20px; border-radius:6px; background:#e7eef6; color:#073967; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; }
+  .slot select { flex:1; height:34px; border:1.5px solid #e2e6ec; border-radius:8px; background:#fff; font-size:13px; font-weight:600; color:#2a3342; padding:0 8px; cursor:pointer; }
+  .slot select:focus { outline:none; border-color:#0d5aa0; }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:4px; }
   .ai { height:44px; border:1.5px solid #e2e6ec; border-radius:10px; background:#fff; cursor:pointer; font-size:13px; font-weight:600; color:#2a3342; transition:transform .06s ease, background .12s ease, border-color .12s ease, box-shadow .12s ease; }
   .ai:hover { border-color:#b9c2cd; background:#fbfcfd; }
@@ -29,6 +35,20 @@
   #quit { border:0; background:#e3e7ec; color:#5b6473; font-size:12px; font-weight:700; padding:7px 14px; border-radius:7px; cursor:pointer; transition:transform .06s ease, filter .12s ease; }
   #quit:hover { filter:brightness(.96); }
   #quit:active { transform:scale(.94); }
+  /* 모니터 선택 */
+  .mon-row { display:flex; align-items:center; gap:8px; margin-top:2px; cursor:pointer; }
+  .mon-row input { width:15px; height:15px; accent-color:#073967; cursor:pointer; }
+  .mon-row span { font-size:12.5px; font-weight:600; color:#4a5362; }
+  #picker { position:relative; margin-top:10px; height:0; overflow:hidden; border-radius:10px;
+            background:#eef1f4; transition:height .12s ease; }
+  #picker.show { height:158px; border:1px solid #e2e6ec; }
+  .mon { position:absolute; box-sizing:border-box; border:1.5px solid #b9c2cd; border-radius:4px;
+         background:#fff; display:flex; align-items:center; justify-content:center; text-align:center;
+         cursor:pointer; overflow:hidden; transition:border-color .1s ease, background .1s ease; }
+  .mon:hover { border-color:#0d5aa0; }
+  .mon span { font-size:9px; line-height:1.15; font-weight:600; color:#5b6473; padding:1px 2px; word-break:keep-all; }
+  .mon.sel { border-color:#073967; background:#e7f0f9; box-shadow:0 0 0 2px rgba(7,57,103,.18); }
+  .mon.sel span { color:#073967; }
 </style>
 </head>
 <body>
@@ -37,9 +57,13 @@
     <div><h1>AI Ask</h1><p>4개 AI 동시 · 같은 AI 4개 독립</p></div>
   </div>
 
-  <div class="lbl">모드 1 · 4개 AI 동시</div>
+  <label class="mon-row"><input type="checkbox" id="defChk" checked><span>기본 설정 (주 모니터에 열기)</span></label>
+  <div id="picker"></div>
+
+  <div class="lbl">모드 1 · 4개 AI 동시 (왼쪽부터 선택)</div>
+  <div id="slots"></div>
   <button id="multi">4개 AI 띄우기</button>
-  <div class="desc" id="multiDesc">노션·제미나이·챗지피티·클로드 창 4개. 어디서든 <b>!질문</b> 복사→전송, <b>!!</b> 복사→수집</div>
+  <div class="desc" id="multiDesc">선택한 4개 AI 창을 왼쪽부터 배치. 어디서든 <b>!질문</b> 복사→전송, <b>!!</b> 복사→수집 <br>(전송 미지원 AI는 창만 열리고 전송·수집에서 빠짐)</div>
 
   <div class="lbl">모드 2 · 같은 AI 4개 (독립)</div>
   <div class="grid" id="grid"></div>
@@ -57,16 +81,117 @@
   const stx = document.getElementById('stx');
   const btns = {};
 
+  // ── 모니터 선택 ──
+  const defChk = document.getElementById('defChk');
+  const picker = document.getElementById('picker');
+  let displays = [];
+  let selectedId = null;   // null = 주 모니터
+
+  // 체크되어 있으면 항상 주 모니터(null), 아니면 선택한 모니터 id.
+  function currentDisplayId() { return defChk.checked ? null : selectedId; }
+
+  function drawPicker() {
+    picker.innerHTML = '';
+    if (!displays.length) return;
+    const minX = Math.min(...displays.map(d => d.bounds.x));
+    const minY = Math.min(...displays.map(d => d.bounds.y));
+    const maxX = Math.max(...displays.map(d => d.bounds.x + d.bounds.width));
+    const maxY = Math.max(...displays.map(d => d.bounds.y + d.bounds.height));
+    const spanX = (maxX - minX) || 1, spanY = (maxY - minY) || 1;
+    const MW = 356, MH = 156, PAD = 8;
+    const scale = Math.min((MW - 2*PAD)/spanX, (MH - 2*PAD)/spanY);
+    const offX = PAD + ((MW - 2*PAD) - spanX*scale)/2;
+    const offY = PAD + ((MH - 2*PAD) - spanY*scale)/2;
+    displays.forEach(d => {
+      const el = document.createElement('div');
+      el.className = 'mon' + (d.id === selectedId ? ' sel' : '');
+      el.style.left   = (offX + (d.bounds.x - minX)*scale) + 'px';
+      el.style.top    = (offY + (d.bounds.y - minY)*scale) + 'px';
+      el.style.width  = Math.max(20, d.bounds.width*scale)  + 'px';
+      el.style.height = Math.max(16, d.bounds.height*scale) + 'px';
+      const sp = document.createElement('span');
+      sp.textContent = d.label + (d.primary ? ' ★' : '');
+      el.appendChild(sp);
+      el.onclick = () => { selectedId = d.id; drawPicker(); };
+      picker.appendChild(el);
+    });
+  }
+
+  async function loadDisplays() {
+    displays = await aiAsk.getDisplays();
+    if (selectedId == null) {
+      const p = displays.find(d => d.primary);
+      if (p) selectedId = p.id;
+    }
+    drawPicker();
+  }
+
+  defChk.onchange = async () => {
+    if (defChk.checked) {
+      picker.classList.remove('show');
+    } else {
+      await loadDisplays();          // 펼칠 때 최신 배치로 다시 그림
+      picker.classList.add('show');
+    }
+    await aiAsk.refit();             // 내용 높이 바뀜 → 창 다시 맞춤
+  };
+
   aiAsk.list.forEach(a => {
     const b = document.createElement('button');
     b.className = 'ai';
     b.textContent = a.name;
-    b.onclick = () => aiAsk.launchSolo(a.key);
+    b.onclick = () => aiAsk.launchSolo(a.key, currentDisplayId());
     grid.appendChild(b);
     btns[a.key] = b;
   });
 
-  multi.onclick = () => aiAsk.launchMulti();
+  // ── 모드 1 · 자리별 모델 선택 (왼쪽부터 1~4번) ──
+  const slotsEl = document.getElementById('slots');
+  const ORDER_KEY = 'ai-ask-order-v1';
+  const DEFAULT_ORDER = ['notion', 'gemini', 'chatgpt', 'claude'];
+
+  // 저장된 순서를 불러오되, 카탈로그에 있는 4개·중복 없음일 때만 채택.
+  function loadOrder() {
+    try {
+      const raw = JSON.parse(localStorage.getItem(ORDER_KEY));
+      if (Array.isArray(raw)) {
+        const uniq = [...new Set(raw.filter(k => aiAsk.list.some(a => a.key === k)))];
+        if (uniq.length === 4) return uniq;
+      }
+    } catch {}
+    return DEFAULT_ORDER.slice();
+  }
+  let order = loadOrder();
+  function saveOrder() { try { localStorage.setItem(ORDER_KEY, JSON.stringify(order)); } catch {} }
+  function labelOf(a) { return a.send ? a.name : a.name + ' (전송 미지원)'; }
+
+  function buildSlots() {
+    slotsEl.innerHTML = '';
+    order.forEach((key, i) => {
+      const row = document.createElement('div');
+      row.className = 'slot';
+      const n = document.createElement('div');
+      n.className = 'n';
+      n.textContent = i + 1;
+      const sel = document.createElement('select');
+      aiAsk.list.forEach(a => {
+        const opt = document.createElement('option');
+        opt.value = a.key;
+        opt.textContent = labelOf(a);
+        // 다른 자리에서 이미 고른 모델은 비활성 (중복 선택 방지)
+        if (order.some((k, j) => j !== i && k === a.key)) opt.disabled = true;
+        if (a.key === key) opt.selected = true;
+        sel.appendChild(opt);
+      });
+      sel.onchange = () => { order[i] = sel.value; saveOrder(); buildSlots(); };
+      row.appendChild(n);
+      row.appendChild(sel);
+      slotsEl.appendChild(row);
+    });
+  }
+  buildSlots();
+
+  multi.onclick = () => aiAsk.launchMulti(currentDisplayId(), order.slice());
   quit.onclick = () => aiAsk.stop();
 
   // 실행 중에도 버튼은 계속 활성 — 같은 세션에 창을 더 추가할 수 있다.

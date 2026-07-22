@@ -18,19 +18,31 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 // EUC-KR로 처리 → 깨짐. 클립보드 exec 호출에 UTF-8 로케일을 강제한다.
 const UTF8_ENV = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' };
 
+// send: 클립보드 전송/수집(모드 1) 지원 여부. false면 창만 열리고 !질문·!!에서 건너뜀.
 const AI_LIST = [
-  { key: 'notion',  name: 'Notion',  url: 'https://www.notion.so/ai' },
-  { key: 'gemini',  name: 'Gemini',  url: 'https://gemini.google.com/app' },
-  { key: 'chatgpt', name: 'ChatGPT', url: 'https://chatgpt.com' },
-  { key: 'claude',  name: 'Claude',  url: 'https://claude.ai' },
+  { key: 'notion',     name: 'Notion',     url: 'https://www.notion.so/ai',       send: true },
+  { key: 'gemini',     name: 'Gemini',     url: 'https://gemini.google.com/app',  send: true },
+  { key: 'chatgpt',    name: 'ChatGPT',    url: 'https://chatgpt.com',            send: true },
+  { key: 'claude',     name: 'Claude',     url: 'https://claude.ai',              send: true },
+  { key: 'perplexity', name: 'Perplexity', url: 'https://www.perplexity.ai',      send: false },
+  { key: 'grok',       name: 'Grok',       url: 'https://grok.com',               send: false },
 ];
 
-const positions = [
-  { left: 0,    top: 0, width: 514, height: 1400 },
-  { left: 514,  top: 0, width: 514, height: 1400 },
-  { left: 1028, top: 0, width: 514, height: 1400 },
-  { left: 1542, top: 0, width: 514, height: 1400 },
-];
+// 창을 띄울 대상 영역(area = {x,y,width,height}, 보통 선택 모니터의 작업 영역).
+// null이면 아래 FALLBACK_AREA(주 모니터 좌상단 기준)를 쓴다.
+const FALLBACK_AREA = { x: 0, y: 0, width: 2056, height: 1329 };
+
+// 주어진 영역을 가로 4등분한 창 위치 배열. 폭은 모니터 해상도에 맞춰 자동 계산.
+function computePositions(area) {
+  const a = area || FALLBACK_AREA;
+  const colW = Math.floor(a.width / 4);
+  return Array.from({ length: 4 }, (_, i) => ({
+    left: Math.round(a.x + i * colW),
+    top: Math.round(a.y),
+    width: colW,
+    height: Math.round(a.height),
+  }));
+}
 
 function resolveSolo(aiName) {
   return AI_LIST.find(a => a.key === aiName) || null;
@@ -84,9 +96,10 @@ async function ensureContext() {
   return context;
 }
 
-// 첫 세트: 화면 4분할(positions)로 창 4개를 연다. 반환: 순서대로의 page 배열.
-async function openSplitWindows(specs) {
+// 첫 세트: 대상 영역(area)을 4분할로 창 4개를 연다. 반환: 순서대로의 page 배열.
+async function openSplitWindows(specs, area) {
   await ensureContext();
+  const positions = computePositions(area);
   const pages = [];
   for (let i = 0; i < specs.length; i++) {
     const { name, url } = specs[i];
@@ -212,7 +225,7 @@ async function sendToClaude(page, text) {
   }
 }
 
-const SENDERS = { Notion: sendToNotion, Gemini: sendToGemini, ChatGPT: sendToChatGPT, Claude: sendToClaude };
+const SENDERS = { notion: sendToNotion, gemini: sendToGemini, chatgpt: sendToChatGPT, claude: sendToClaude };
 
 // ── 각 AI 답변 수집 ──
 
@@ -268,17 +281,20 @@ async function collectFromClaude(page) {
   }
 }
 
-const COLLECTORS = { Notion: collectFromNotion, Gemini: collectFromGemini, ChatGPT: collectFromChatGPT, Claude: collectFromClaude };
+const COLLECTORS = { notion: collectFromNotion, gemini: collectFromGemini, chatgpt: collectFromChatGPT, claude: collectFromClaude };
 
 // ── 모드 1: 4개 AI + 클립보드 감시 ──
 
-async function launchMulti() {
+async function launchMulti(area, order) {
   if (launching) return;
   launching = true;
   try {
-    const specs = AI_LIST.map(a => ({ name: a.name, url: a.url }));
+    // 선택 순서(키 배열)대로 왼쪽부터 배치. 없거나 잘못되면 기존 기본 4개(카탈로그 앞 4개).
+    const keys = (Array.isArray(order) && order.length) ? order : AI_LIST.slice(0, 4).map(a => a.key);
+    const chosen = keys.map(k => AI_LIST.find(a => a.key === k)).filter(Boolean);
+    const specs = chosen.map(a => ({ name: a.name, url: a.url }));
 
-    // 실행 중에 '4개 AI 띄우기'를 다시 누르면 각 창의 원래 첫 탭(4개 AI)을 앞으로 보여준다.
+    // 실행 중에 '4개 AI 띄우기'를 다시 누르면 각 창의 원래 첫 탭들을 앞으로 보여준다.
     if (isRunning()) {
       for (const p of sessionWindows) {
         if (p && !p.isClosed()) { try { await p.bringToFront(); } catch {} }
@@ -287,21 +303,21 @@ async function launchMulti() {
       return;
     }
 
-    const pages = await openSplitWindows(specs);
+    const pages = await openSplitWindows(specs, area);
     sessionWindows = pages;
     sessionMode = 'multi';
     sessionAi = null;
 
-    // 세션 탭 기록 초기화 — 각 AI는 자기 창(i)에만 첫 탭이 있다.
+    // 세션 탭 기록 초기화 — 각 모델은 자기 창(i)에만 첫 탭이 있다.
     openedTabs = {};
-    AI_LIST.forEach((a, i) => {
+    chosen.forEach((a, i) => {
       openedTabs[a.key] = new Array(pages.length).fill(null);
       openedTabs[a.key][i] = pages[i];
     });
 
-    // 모드1 브로드캐스트 대상 = 4분할 창의 첫 탭들 (창 순서 = AI_LIST 순서)
-    const byName = {};
-    AI_LIST.forEach((a, i) => { byName[a.name] = pages[i]; });
+    // 브로드캐스트 대상 = 선택한 창들. 전송/수집 코드가 있는(send:true) 모델만 실제 전송·수집.
+    const targets = chosen.map((a, i) => ({ key: a.key, name: a.name, page: pages[i], send: a.send }));
+    const sendable = targets.filter(t => t.send && SENDERS[t.key]);
 
     function getClipboard() {
       try { return execSync('pbpaste', { encoding: 'utf-8', env: UTF8_ENV }).trim(); } catch { return ''; }
@@ -313,18 +329,23 @@ async function launchMulti() {
       const preview = text.length > 60 ? text.slice(0, 60) + '...' : text;
       console.log(`\n📨 "${preview}"`);
       const results = await Promise.all(
-        Object.entries(byName).map(([n, p]) => SENDERS[n](p, text).then(r => [n, r]))
+        sendable.map(t => SENDERS[t.key](t.page, text).then(r => [t.name, r]))
       );
       for (const [n, r] of results) console.log(`  ${r} ${n}`);
+      for (const t of targets) {
+        if (!sendable.includes(t)) console.log(`  ⓘ ${t.name} 전송 미지원, 건너뜀`);
+      }
     }
 
     async function collectAll() {
       console.log('\n📋 답변 수집 중...');
-      const entries = Object.entries(byName);
-      const parts = await Promise.all(entries.map(([n, p]) => COLLECTORS[n](p)));
-      const out = parts.map((t, i) => `<답변${i + 1}>\n${t}\n</답변${i + 1}>`).join('\n\n');
+      const parts = await Promise.all(sendable.map(t => COLLECTORS[t.key](t.page)));
+      const out = parts.map((txt, i) => {
+        const label = `모델${i + 1} · ${sendable[i].name}`;
+        return `<${label}>\n${txt}\n</${label}>`;
+      }).join('\n\n');
       execSync('pbcopy', { input: out, env: UTF8_ENV });
-      console.log('  ✅ 4개 AI 답변이 클립보드에 복사되었습니다!');
+      console.log(`  ✅ ${sendable.length}개 모델 답변이 클립보드에 복사되었습니다!`);
     }
 
     clipboardTimer = setInterval(async () => {
@@ -349,7 +370,7 @@ async function launchMulti() {
 
 // ── 모드 2: 같은 AI 4개, 감시 없음 ──
 
-async function launchSolo(aiName) {
+async function launchSolo(aiName, area) {
   const ai = resolveSolo(aiName);
   if (!ai) throw new Error('알 수 없는 AI: ' + aiName);
   if (launching) return;
@@ -359,7 +380,7 @@ async function launchSolo(aiName) {
     if (isRunning()) { await showOrOpen(ai.key, ai.url); emitStatus(); return; }
 
     const specs = Array.from({ length: 4 }, () => ({ name: ai.name, url: ai.url }));
-    const pages = await openSplitWindows(specs);
+    const pages = await openSplitWindows(specs, area);
     sessionWindows = pages;
     sessionMode = 'solo';
     sessionAi = ai.key;

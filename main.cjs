@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain } = require('electron');
+const { app, BrowserWindow, ipcMain, screen } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { homedir } = require('os');
@@ -42,15 +42,42 @@ function clearLock() {
   try { fs.rmSync(`${homedir()}/.ai-ask/profile/SingletonLock`, { force: true }); } catch {}
 }
 
-ipcMain.handle('launch-multi', async () => {
+// displayId → 그 모니터의 작업 영역(메뉴바·독 제외). null이면 주 모니터.
+function resolveArea(displayId) {
+  if (displayId == null) return screen.getPrimaryDisplay().workArea;
+  const d = screen.getAllDisplays().find((x) => x.id === displayId);
+  return (d || screen.getPrimaryDisplay()).workArea;
+}
+
+// 렌더러(디스플레이 정렬 그림)용 모니터 목록.
+ipcMain.handle('get-displays', () => {
+  const primaryId = screen.getPrimaryDisplay().id;
+  return screen.getAllDisplays().map((d) => ({
+    id: d.id,
+    label: d.label,
+    primary: d.id === primaryId,
+    bounds: d.bounds,
+  }));
+});
+
+// picker 펼침/접힘으로 내용 높이가 바뀔 때 창을 다시 딱 맞춘다.
+ipcMain.handle('refit', async () => {
+  if (!win || win.isDestroyed()) return;
+  try {
+    const h = await win.webContents.executeJavaScript('document.documentElement.scrollHeight');
+    win.setContentSize(400, Math.max(300, Math.ceil(h)));
+  } catch {}
+});
+
+ipcMain.handle('launch-multi', async (_e, displayId, order) => {
   clearLock();
-  await controller.launchMulti();
+  await controller.launchMulti(resolveArea(displayId), order);
   return { ok: true };
 });
 
-ipcMain.handle('launch-solo', async (_e, key) => {
+ipcMain.handle('launch-solo', async (_e, key, displayId) => {
   clearLock();
-  await controller.launchSolo(key);
+  await controller.launchSolo(key, resolveArea(displayId));
   return { ok: true };
 });
 
