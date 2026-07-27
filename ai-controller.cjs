@@ -1,5 +1,5 @@
 // AI Ask 엔진 — Playwright로 시스템 Google Chrome을 구동한다.
-// - launchMulti(): 4개 AI(노션·제미나이·챗지피티·클로드) 창 + 클립보드 감시(!질문/!!)
+// - launchMulti(): 4개 AI(노션·제미나이·챗지피티·클로드) 창 + 클립보드 감시(!질문/!!/AI 링크 모음)
 // - launchSolo(aiKey): 같은 AI 창 4개 (감시·전송·수집 없음, 완전 독립)
 // - stop(): 감시 해제 + 크롬 컨텍스트 close
 // 로그인 프로필(~/.ai-ask/profile)을 공유하므로 동시 세션은 1개.
@@ -48,6 +48,35 @@ function computePositions(area) {
 
 function resolveSolo(aiName) {
   return AI_LIST.find(a => a.key === aiName) || null;
+}
+
+// ── AI 링크 모음 감지 (모드 1) ──
+// 복사한 텍스트에 서로 다른 AI의 채팅 링크가 2개 이상 들어 있으면 "링크 모음"으로 보고,
+// 열려 있는 각 AI 창을 해당 주소로 이동시킨다. (링크 1개짜리 일반 복사에는 반응하지 않음)
+const LINK_HOSTS = {
+  notion:     h => h === 'app.notion.com' || h === 'www.notion.so' || h === 'notion.so',
+  gemini:     h => h === 'gemini.google.com',
+  chatgpt:    h => h === 'chatgpt.com' || h === 'chat.openai.com',
+  claude:     h => h === 'claude.ai',
+  perplexity: h => h === 'perplexity.ai' || h === 'www.perplexity.ai',
+  grok:       h => h === 'grok.com',
+  genspark:   h => h === 'genspark.ai' || h === 'www.genspark.ai',
+  aistudio:   h => h === 'aistudio.google.com',
+};
+
+// 텍스트에서 AI별 링크를 뽑는다. 같은 AI 링크가 여러 개면 첫 번째만. 반환: { aiKey: url }
+function parseAiLinks(text) {
+  const found = {};
+  const urls = text.match(/https?:\/\/[^\s"'`<>()\[\]]+/g) || [];
+  for (const raw of urls) {
+    const url = raw.replace(/[.,;:]+$/, '');   // 문장 끝 구두점 제거
+    let host;
+    try { host = new URL(url).hostname; } catch { continue; }
+    for (const [key, test] of Object.entries(LINK_HOSTS)) {
+      if (test(host)) { if (!found[key]) found[key] = url; break; }
+    }
+  }
+  return found;
 }
 
 let context = null;
@@ -408,6 +437,23 @@ async function launchMulti(area, order) {
       console.log(`  ✅ ${sendable.length}개 모델 답변이 클립보드에 복사되었습니다!`);
     }
 
+    // 링크 모음 복사 → 열려 있는 각 AI 창을 해당 채팅 주소로 이동. 이후 !질문은 그 대화방으로 이어진다.
+    async function openLinks(links) {
+      console.log('\n🔗 AI 링크 모음 감지 — 각 창을 해당 주소로 이동');
+      await Promise.all(targets.map(async t => {
+        const url = links[t.key];
+        if (!url) return;
+        try {
+          await t.page.goto(url, { waitUntil: 'load', timeout: 20000 });
+          console.log(`  ✓ ${t.name} → ${url}`);
+        } catch {
+          console.log(`  ⚠ ${t.name} 이동 실패`);
+        }
+      }));
+      const missing = Object.keys(links).filter(k => !targets.some(t => t.key === k));
+      if (missing.length) console.log(`  ⓘ 열려 있지 않은 모델 링크 건너뜀: ${missing.join(', ')}`);
+    }
+
     clipboardTimer = setInterval(async () => {
       if (busy) return;
       const cur = getClipboard();
@@ -418,6 +464,11 @@ async function launchMulti(area, order) {
         } else if (cur.startsWith(TRIGGER_PREFIX)) {
           const q = cur.slice(TRIGGER_PREFIX.length).trim();
           if (q) { busy = true; await sendToAll(q); busy = false; }
+        } else {
+          const links = parseAiLinks(cur);
+          if (Object.keys(links).length >= 2) {
+            busy = true; await openLinks(links); busy = false;
+          }
         }
       }
     }, 1000);
