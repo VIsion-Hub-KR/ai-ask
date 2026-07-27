@@ -1,2 +1,0 @@
-#!/bin/bash
-open -a Terminal "$(dirname "$0")/../../../AI-Ask.command"
