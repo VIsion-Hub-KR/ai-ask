@@ -21,6 +21,14 @@
   .slot .n { flex:0 0 auto; width:20px; height:20px; border-radius:6px; background:#e7eef6; color:#073967; font-size:11px; font-weight:800; display:flex; align-items:center; justify-content:center; }
   .slot select { flex:1; height:34px; border:1.5px solid #e2e6ec; border-radius:8px; background:#fff; font-size:13px; font-weight:600; color:#2a3342; padding:0 8px; cursor:pointer; }
   .slot select:focus { outline:none; border-color:#0d5aa0; }
+  /* 링크 모음 붙여넣기 칸 */
+  #linkBox { width:100%; height:52px; border:1.5px dashed #b9c2cd; border-radius:10px; background:#fff;
+             font-size:12px; color:#2a3342; padding:8px 10px; resize:none; font-family:inherit; line-height:1.4; }
+  #linkBox:focus { outline:none; border-color:#0d5aa0; border-style:solid; }
+  #linkBox::placeholder { color:#a5adba; }
+  #linkMsg { min-height:15px; }
+  #linkMsg.ok { color:#0b7a5e; font-weight:600; }
+  #linkMsg.err { color:#c0392b; font-weight:600; }
   .grid { display:grid; grid-template-columns:1fr 1fr; gap:9px; margin-top:4px; }
   .ai { height:44px; border:1.5px solid #e2e6ec; border-radius:10px; background:#fff; cursor:pointer; font-size:13px; font-weight:600; color:#2a3342; transition:transform .06s ease, background .12s ease, border-color .12s ease, box-shadow .12s ease; }
   .ai:hover { border-color:#b9c2cd; background:#fbfcfd; }
@@ -64,6 +72,10 @@
   <div id="slots"></div>
   <button id="multi">4개 AI 띄우기</button>
   <div class="desc" id="multiDesc">선택한 4개 AI 창을 왼쪽부터 배치. 어디서든 <b>!질문</b> 복사→전송, <b>!!</b> 복사→수집 <br>(전송 미지원 AI는 창만 열리고 전송·수집에서 빠짐)</div>
+
+  <div class="lbl">대화방 링크 모음 붙여넣기</div>
+  <textarea id="linkBox" placeholder="노션에 모아둔 AI 채팅 링크들을 여기에 ⌘V 붙여넣으세요.&#10;창이 없으면 그 대화방 주소로 바로 열고, 떠 있으면 이동합니다."></textarea>
+  <div class="desc" id="linkMsg"></div>
 
   <div class="lbl">모드 2 · 같은 AI 4개 (독립)</div>
   <div class="grid" id="grid"></div>
@@ -199,6 +211,39 @@
 
   multi.onclick = () => aiAsk.launchMulti(currentDisplayId(), order.slice());
   quit.onclick = () => aiAsk.stop();
+
+  // ── 링크 모음 붙여넣기 → 각 AI 창을 그 대화방 주소로 (꺼져 있으면 그 주소로 바로 띄움) ──
+  const linkBox = document.getElementById('linkBox');
+  const linkMsg = document.getElementById('linkMsg');
+  let applying = false;
+  async function applyLinkBox() {
+    const text = linkBox.value.trim();
+    if (!text || applying) return;
+    applying = true;
+    linkMsg.className = 'desc';
+    linkMsg.textContent = '링크 확인해서 창 여는 중...';
+    try {
+      const r = await aiAsk.applyLinks(text, currentDisplayId(), order.slice());
+      if (!r || !r.ok) {
+        linkMsg.className = 'desc err';
+        linkMsg.textContent = 'AI 채팅 링크를 못 찾았어요. 주소(https://...)가 들어있는 텍스트를 붙여넣어 주세요.';
+      } else {
+        linkMsg.className = 'desc ok';
+        let m = '✓ ' + r.moved.join(' · ') + ' 대화방으로 이동 완료';
+        if (r.skipped.length) m += ' (창 없어 건너뜀: ' + r.skipped.join(' · ') + ')';
+        linkMsg.textContent = m;
+        linkBox.value = '';
+      }
+    } catch {
+      linkMsg.className = 'desc err';
+      linkMsg.textContent = '적용 중 오류가 났어요. 다시 시도해 주세요.';
+    }
+    applying = false;
+  }
+  linkBox.addEventListener('paste', () => setTimeout(applyLinkBox, 80));
+  linkBox.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); applyLinkBox(); }
+  });
 
   // 실행 중에도 버튼은 계속 활성 — 같은 세션에 창을 더 추가할 수 있다.
   aiAsk.onStatus(s => {

@@ -374,14 +374,15 @@ const COLLECTORS = {
 
 // ── 모드 1: 4개 AI + 클립보드 감시 ──
 
-async function launchMulti(area, order) {
+async function launchMulti(area, order, urlOverrides) {
   if (launching) return;
   launching = true;
   try {
     // 선택 순서(키 배열)대로 왼쪽부터 배치. 없거나 잘못되면 기존 기본 4개(카탈로그 앞 4개).
+    // urlOverrides = { aiKey: url } — 있으면 그 AI의 첫 탭을 기본 주소 대신 이 주소로 연다(링크 모음 적용).
     const keys = (Array.isArray(order) && order.length) ? order : AI_LIST.slice(0, 4).map(a => a.key);
     const chosen = keys.map(k => AI_LIST.find(a => a.key === k)).filter(Boolean);
-    const specs = chosen.map(a => ({ name: a.name, url: a.url }));
+    const specs = chosen.map(a => ({ name: a.name, url: (urlOverrides && urlOverrides[a.key]) || a.url }));
 
     // 실행 중에 '4개 AI 띄우기'를 다시 누르면 각 창의 원래 첫 탭들을 앞으로 보여준다.
     if (isRunning()) {
@@ -503,6 +504,38 @@ async function launchSolo(aiName, area) {
   }
 }
 
+// 버튼 창의 "링크 모음 붙여넣기" 적용:
+// - 꺼져 있으면: 링크의 AI들을 왼쪽부터 배치해, 4분할 창을 처음부터 그 대화방 주소로 연다.
+// - 실행 중이면: 해당 AI의 열려 있는 탭들을 그 주소로 이동시킨다.
+// 반환: { ok, moved: [이름], skipped: [이름] } — skipped = 링크는 있는데 그 AI 창이 안 열려 있음.
+async function applyLinks(text, area, order) {
+  const links = parseAiLinks(String(text || ''));
+  const keys = Object.keys(links);
+  if (!keys.length) return { ok: false, reason: 'no-links' };
+  const nameOf = k => (AI_LIST.find(a => a.key === k) || { name: k }).name;
+
+  if (!isRunning()) {
+    const rest = (Array.isArray(order) && order.length ? order : AI_LIST.map(a => a.key))
+      .filter(k => !keys.includes(k));
+    const slots = keys.concat(rest).slice(0, 4);
+    await launchMulti(area, slots, links);
+    return { ok: true, moved: slots.filter(k => links[k]).map(nameOf), skipped: [] };
+  }
+
+  const moved = [], skipped = [];
+  for (const k of keys) {
+    const pages = (openedTabs[k] || []).filter(p => p && !p.isClosed());
+    if (!pages.length) { skipped.push(nameOf(k)); continue; }
+    await Promise.all(pages.map(p =>
+      p.goto(links[k], { waitUntil: 'load', timeout: 20000 }).catch(() => {})
+    ));
+    console.log(`  🔗 ${nameOf(k)} → ${links[k]}`);
+    moved.push(nameOf(k));
+  }
+  emitStatus();
+  return { ok: true, moved, skipped };
+}
+
 async function stop() {
   if (clipboardTimer) { clearInterval(clipboardTimer); clipboardTimer = null; }
   if (context) { try { await context.close(); } catch {} context = null; }
@@ -514,4 +547,4 @@ async function stop() {
   emit({ running: false, mode: null, ai: null, openAis: [] });
 }
 
-module.exports = { AI_LIST, resolveSolo, launchMulti, launchSolo, stop, onStatus };
+module.exports = { AI_LIST, resolveSolo, launchMulti, launchSolo, applyLinks, stop, onStatus };

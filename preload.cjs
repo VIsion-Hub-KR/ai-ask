@@ -7,6 +7,7 @@ contextBridge.exposeInMainWorld('aiAsk', {
   refit: () => ipcRenderer.invoke('refit'),
   launchMulti: (displayId, order) => ipcRenderer.invoke('launch-multi', displayId, order),
   launchSolo: (key, displayId) => ipcRenderer.invoke('launch-solo', key, displayId),
+  applyLinks: (text, displayId, order) => ipcRenderer.invoke('apply-links', text, displayId, order),
   stop: () => ipcRenderer.invoke('stop'),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),
 });

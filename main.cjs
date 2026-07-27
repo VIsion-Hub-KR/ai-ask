@@ -81,6 +81,11 @@ ipcMain.handle('launch-solo', async (_e, key, displayId) => {
   return { ok: true };
 });
 
+ipcMain.handle('apply-links', async (_e, text, displayId, order) => {
+  clearLock();
+  return controller.applyLinks(text, resolveArea(displayId), order);
+});
+
 ipcMain.handle('stop', async () => {
   await controller.stop();
   return { ok: true };
