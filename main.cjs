@@ -31,6 +31,10 @@ function createWindow() {
   controller.onStatus((s) => {
     if (win && !win.isDestroyed()) win.webContents.send('status', s);
   });
+
+  controller.onActivity((msg) => {
+    if (win && !win.isDestroyed()) win.webContents.send('activity', msg);
+  });
 }
 
 // 내용 높이에 창을 맞추되, 모니터 작업 영역보다 커지지 않게 잘라서

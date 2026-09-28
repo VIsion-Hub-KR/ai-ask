@@ -10,4 +10,5 @@ contextBridge.exposeInMainWorld('aiAsk', {
   applyLinks: (text, displayId, order) => ipcRenderer.invoke('apply-links', text, displayId, order),
   stop: () => ipcRenderer.invoke('stop'),
   onStatus: (cb) => ipcRenderer.on('status', (_e, s) => cb(s)),
+  onActivity: (cb) => ipcRenderer.on('activity', (_e, m) => cb(m)),
 });

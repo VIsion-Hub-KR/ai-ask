@@ -36,7 +36,11 @@
   /* 현재 열려 있는 AI = 녹색 */
   .ai.open { border-color:#10a37f; background:#eafaf5; color:#0b7a5e; box-shadow:0 0 0 3px rgba(16,163,127,.12); }
   .ai.open:hover { background:#e2f6ef; }
-  .bar { margin-top:18px; display:flex; align-items:center; justify-content:space-between; background:#eef1f4; border-radius:9px; padding:10px 12px; }
+  /* 전송·수집 결과 한 줄 */
+  #actMsg { min-height:15px; margin:14px 2px 0; font-size:11px; line-height:1.5; color:#8a93a2; }
+  #actMsg.ok { color:#0b7a5e; font-weight:600; }
+  #actMsg.err { color:#c0392b; font-weight:600; }
+  .bar { margin-top:10px; display:flex; align-items:center; justify-content:space-between; background:#eef1f4; border-radius:9px; padding:10px 12px; }
   .st { display:flex; align-items:center; gap:8px; font-size:12.5px; font-weight:600; color:#4a5362; }
   .led { width:9px; height:9px; border-radius:50%; background:#c2c8d0; }
   .led.on { background:#28c840; box-shadow:0 0 0 3px rgba(40,200,64,.18); }
@@ -79,6 +83,8 @@
 
   <div class="lbl">모드 2 · 같은 AI 4개 (독립)</div>
   <div class="grid" id="grid"></div>
+
+  <div id="actMsg"></div>
 
   <div class="bar">
     <div class="st"><span class="led" id="led"></span><span id="stx">꺼짐</span></div>
@@ -243,6 +249,13 @@
   linkBox.addEventListener('paste', () => setTimeout(applyLinkBox, 80));
   linkBox.addEventListener('keydown', e => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); applyLinkBox(); }
+  });
+
+  // 전송·수집 결과 표시 (콘솔이 안 보이는 앱 실행에서도 실패를 알 수 있게)
+  const actMsg = document.getElementById('actMsg');
+  aiAsk.onActivity(m => {
+    actMsg.className = /실패|못 가져옴/.test(m) ? 'err' : 'ok';
+    actMsg.textContent = m;
   });
 
   // 실행 중에도 버튼은 계속 활성 — 같은 세션에 창을 더 추가할 수 있다.
