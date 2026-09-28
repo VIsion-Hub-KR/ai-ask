@@ -85,6 +85,12 @@ let statusCb = () => {};
 function onStatus(cb) { statusCb = cb; }
 function emit(s) { try { statusCb(s); } catch {} }
 
+// 전송·수집 결과를 앱 화면에 알린다 (콘솔만 찍으면 앱으로 띄웠을 때 안 보여
+// 실패해도 사용자가 모른 채 지나간다).
+let activityCb = () => {};
+function onActivity(cb) { activityCb = cb; }
+function note(text) { try { activityCb(text); } catch {} }
+
 // 창 생성 중복 실행(레이스) 방지 — 같은 프로필로 두 번째 크롬을 켜려다 충돌하는 것 차단
 let launching = false;
 // 첫 세트로 띄운 4분할 창들의 첫 탭 페이지 (창 0~3의 대표 페이지)
@@ -338,12 +344,26 @@ async function collectFromGemini(page) {
   }
 }
 
+// 2026-09 개편으로 data-message-author-role이 사라져 수집이 멈췄다.
+// 후보를 순서대로 훑어 처음으로 내용이 잡히는 것을 쓴다.
 async function collectFromChatGPT(page) {
   try {
     return (await page.evaluate(() => {
-      const r = document.querySelectorAll('[data-message-author-role="assistant"]');
-      const last = r[r.length - 1];
-      return last ? last.innerText.trim() : '';
+      const strip = s => String(s || '').replace(/^\s*(ChatGPT 답변|ChatGPT said)\s*:\s*/i, '').trim();
+      const picks = [
+        // 구버전 (되돌아올 경우 대비)
+        () => [...document.querySelectorAll('[data-message-author-role="assistant"]')].pop(),
+        // 현행: 답변 턴 머리말(sr-only) → 그 부모가 답변 덩어리
+        () => { const n = [...document.querySelectorAll('[data-conversation-role="assistant"]')].pop(); return n && n.parentElement; },
+        // 현행 대안: 답변 턴 컨테이너
+        () => [...document.querySelectorAll('[data-content-search-unit-key$=":assistant"]')].pop(),
+      ];
+      for (const f of picks) {
+        const el = f();
+        const t = el ? strip(el.innerText) : '';
+        if (t) return t;
+      }
+      return '';
     })) || '(답변을 찾을 수 없음)';
   } catch (e) {
     return '(수집 실패: ' + e.message.slice(0, 30) + ')';
@@ -438,6 +458,11 @@ async function launchMulti(area, order, urlOverrides) {
       for (const t of targets) {
         if (!sendable.includes(t)) console.log(`  ⓘ ${t.name} 전송 미지원, 건너뜀`);
       }
+      const failed = results.filter(([, r]) => r !== '✓');
+      note(failed.length
+        ? `전송 ${results.length - failed.length}/${results.length} · 실패: ` +
+          failed.map(([n, r]) => `${n}(${r.replace(/^✗\s*/, '')})`).join(', ')
+        : `전송 완료 · ${results.length}개 AI`);
     }
 
     async function collectAll() {
@@ -449,6 +474,13 @@ async function launchMulti(area, order, urlOverrides) {
       }).join('\n\n');
       execSync('pbcopy', { input: out, env: UTF8_ENV });
       console.log(`  ✅ ${sendable.length}개 모델 답변이 클립보드에 복사되었습니다!`);
+      const missed = parts
+        .map((txt, i) => [sendable[i].name, txt])
+        .filter(([, txt]) => /^\((답변을 찾을 수 없음|수집 실패)/.test(txt))
+        .map(([n]) => n);
+      note(missed.length
+        ? `수집 ${parts.length - missed.length}/${parts.length} · 못 가져옴: ${missed.join(', ')}`
+        : `수집 완료 · ${parts.length}개 답변 클립보드 복사됨`);
     }
 
     // 링크 모음 복사 → 열려 있는 각 AI 창을 해당 채팅 주소로 이동. 이후 !질문은 그 대화방으로 이어진다.
@@ -560,4 +592,4 @@ async function stop() {
   emit({ running: false, mode: null, ai: null, openAis: [] });
 }
 
-module.exports = { AI_LIST, resolveSolo, launchMulti, launchSolo, applyLinks, stop, onStatus };
+module.exports = { AI_LIST, resolveSolo, launchMulti, launchSolo, applyLinks, stop, onStatus, onActivity };
