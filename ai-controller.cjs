@@ -227,10 +227,23 @@ async function sendToGemini(page, text) {
   }
 }
 
+// ChatGPT 입력칸 후보 — 앞에서부터 순서대로 찾아 처음 보이는 것을 쓴다.
+// 2026-09 개편으로 #prompt-textarea id가 사라지고 속성만 남아 전송이 멈췄다.
+// div[contenteditable="true"] 같은 느슨한 셀렉터는 캔버스/"메시지" 박스를 잘못 잡으므로 제외.
+const CHATGPT_INPUTS = [
+  '#prompt-textarea',                            // 구버전 id (되돌아올 경우 대비)
+  '[data-composer-markdown]',                    // 현행 작성칸 전용 속성
+  'form [contenteditable="true"].ProseMirror',   // 작성 폼 안의 에디터 (최후 보루)
+];
+
 async function sendToChatGPT(page, text) {
   try {
-    // ChatGPT 진짜 입력칸(#prompt-textarea)만 정확히 지정.
-    const input = page.locator('#prompt-textarea').first();
+    let input = null;
+    for (const sel of CHATGPT_INPUTS) {
+      const cand = page.locator(sel).first();
+      if (await cand.count() && await cand.isVisible().catch(() => false)) { input = cand; break; }
+    }
+    if (!input) return '✗ 입력칸 없음';
     await input.click();
     await input.fill(text);
     await page.waitForTimeout(300);
