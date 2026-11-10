@@ -19,9 +19,11 @@ const CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const UTF8_ENV = { ...process.env, LANG: 'en_US.UTF-8', LC_ALL: 'en_US.UTF-8' };
 
 // send: 클립보드 전송/수집(모드 1) 지원 여부. false면 창만 열리고 !질문·!!에서 건너뜀.
+// Gemini는 /u/1 = 프로필에 두 번째로 로그인한 구글 계정. 화면에서 계정을 바꾸면 새 탭이 열려
+// 전송 대상(처음 띄운 탭)과 어긋나므로, 쓸 계정으로 처음부터 연다.
 const AI_LIST = [
   { key: 'notion',     name: 'Notion',     url: 'https://www.notion.so/ai',                 send: true },
-  { key: 'gemini',     name: 'Gemini',     url: 'https://gemini.google.com/app',            send: true },
+  { key: 'gemini',     name: 'Gemini',     url: 'https://gemini.google.com/u/1/app',        send: true },
   { key: 'chatgpt',    name: 'ChatGPT',    url: 'https://chatgpt.com',                      send: true },
   { key: 'claude',     name: 'Claude',     url: 'https://claude.ai',                        send: true },
   { key: 'perplexity', name: 'Perplexity', url: 'https://www.perplexity.ai',                send: true },
