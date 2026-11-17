@@ -119,6 +119,17 @@ function emitStatus() {
   });
 }
 
+function resetSession(closedContext) {
+  if (context !== closedContext) return;
+  if (clipboardTimer) { clearInterval(clipboardTimer); clipboardTimer = null; }
+  context = null;
+  sessionWindows = [];
+  openedTabs = {};
+  sessionMode = null;
+  sessionAi = null;
+  emitStatus();
+}
+
 async function ensureContext() {
   if (context) return context;
   mkdirSync(PROFILE_DIR, { recursive: true });
@@ -132,6 +143,8 @@ async function ensureContext() {
     ],
     viewport: null,
   });
+  const currentContext = context;
+  currentContext.on('close', () => resetSession(currentContext));
   return context;
 }
 
@@ -584,14 +597,9 @@ async function applyLinks(text, area, order) {
 }
 
 async function stop() {
-  if (clipboardTimer) { clearInterval(clipboardTimer); clipboardTimer = null; }
-  if (context) { try { await context.close(); } catch {} context = null; }
-  sessionWindows = [];
-  openedTabs = {};
-  sessionMode = null;
-  sessionAi = null;
-  launching = false;
-  emit({ running: false, mode: null, ai: null, openAis: [] });
+  const stoppingContext = context;
+  if (stoppingContext) { try { await stoppingContext.close(); } catch {} }
+  if (context === stoppingContext) resetSession(stoppingContext);
 }
 
 module.exports = { AI_LIST, resolveSolo, launchMulti, launchSolo, applyLinks, stop, onStatus, onActivity };

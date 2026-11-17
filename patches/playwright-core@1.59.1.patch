@@ -1,0 +1,73 @@
+diff --git a/lib/server/pipeTransport.js b/lib/server/pipeTransport.js
+index 0c924ef57629a2063e5854fd1096fc04974a8a79..fc8eebc5bfa0cb3a4957baed11aaf79e04246375 100644
+--- a/lib/server/pipeTransport.js
++++ b/lib/server/pipeTransport.js
+@@ -31,11 +31,7 @@ class PipeTransport {
+     this._pipeRead = pipeRead;
+     this._pipeWrite = pipeWrite;
+     pipeRead.on("data", (buffer) => this._dispatch(buffer));
+-    pipeRead.on("close", () => {
+-      this._closed = true;
+-      if (this._onclose)
+-        this._onclose.call(null);
+-    });
++    pipeRead.on("close", () => this._didClose());
+     pipeRead.on("error", (e) => import_debugLogger.debugLogger.log("error", e));
+     pipeWrite.on("error", (e) => import_debugLogger.debugLogger.log("error", e));
+     this.onmessage = void 0;
+@@ -57,7 +53,34 @@ class PipeTransport {
+   close() {
+     throw new Error("unimplemented");
+   }
++  _didClose() {
++    if (this._closed)
++      return;
++    this._closed = true;
++    this._pendingBuffers = [];
++    if (this._onclose)
++      this._onclose.call(null);
++  }
++  _dispatchMessage(message) {
++    this._waitForNextTask(() => {
++      if (this._closed || !this.onmessage || !message.trim())
++        return;
++      let parsedJson;
++      try {
++        parsedJson = JSON.parse(message);
++      } catch {
++        import_debugLogger.debugLogger.log("error", "Closing pipe due to malformed JSON");
++        this._pipeRead.destroy();
++        this._pipeWrite.destroy();
++        this._didClose();
++        return;
++      }
++      this.onmessage.call(null, parsedJson);
++    });
++  }
+   _dispatch(buffer) {
++    if (this._closed)
++      return;
+     let end = buffer.indexOf("\0");
+     if (end === -1) {
+       this._pendingBuffers.push(buffer);
+@@ -65,18 +88,12 @@ class PipeTransport {
+     }
+     this._pendingBuffers.push(buffer.slice(0, end));
+     const message = Buffer.concat(this._pendingBuffers).toString();
+-    this._waitForNextTask(() => {
+-      if (this.onmessage)
+-        this.onmessage.call(null, JSON.parse(message));
+-    });
++    this._dispatchMessage(message);
+     let start = end + 1;
+     end = buffer.indexOf("\0", start);
+     while (end !== -1) {
+       const message2 = buffer.toString(void 0, start, end);
+-      this._waitForNextTask(() => {
+-        if (this.onmessage)
+-          this.onmessage.call(null, JSON.parse(message2));
+-      });
++      this._dispatchMessage(message2);
+       start = end + 1;
+       end = buffer.indexOf("\0", start);
+     }

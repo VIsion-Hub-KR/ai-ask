@@ -4,6 +4,7 @@
   "description": "Ask 4 AIs simultaneously - Notion AI, Gemini, ChatGPT, Claude",
   "main": "main.cjs",
   "scripts": {
+    "test": "node test-controller.cjs && node --test test-pipe-transport.cjs test-controller-recovery.cjs",
     "start": "electron .",
     "cli": "node browser.mjs",
     "dist": "electron-builder"

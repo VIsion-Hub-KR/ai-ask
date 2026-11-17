@@ -4,3 +4,5 @@ allowBuilds:
   electron: true
   electron-builder: true
   esbuild: true
+patchedDependencies:
+  playwright-core@1.59.1: patches/playwright-core@1.59.1.patch
